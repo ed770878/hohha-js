@@ -1,0 +1,180 @@
+<head>
+	<title>HD XOR</title>
+</head>
+<body>
+	<h1>Hohha Dynamic XOR</h1>
+
+	<h2>Interactive Encryption Tool</h2>
+
+	<h4>Key</h4>
+	<div><label for="key">Key:</label></div>
+	<div><textarea id="key" cols="90"></textarea></div>
+	<div><label for="key-jmp">Key Jumps:</label></div>
+	<div><input id="key-jmp" type="number"/></div>
+	<div><label for="key-len">Key Length:</label></div>
+	<div><input id="key-len" type="number"/></div>
+	<div><input id="key-gen" type="button"
+		value="Generate Random Key" onclick="do_key()"/></div>
+
+	<h4>Salt</h4>
+	<div><label for="salt">Salt:</label></div>
+	<div><input id="salt" type="text"/></div>
+	<div><input id="salt-gen" type="button"
+		value="Generate Random Salt" onclick="do_salt()"/></div>
+	<div><input id="salt-key" type="button"
+		value="Use Key Salt" onclick="do_salt_of_key()"/></div>
+
+	<h4>Plain Message</h4>
+	<div><label for="msg">Plaintext</label></div>
+	<div><textarea id="msg" cols="90"></textarea></div>
+	<div><input id="msg-b64" type="checkbox"/>
+		<label for="msg-b64">Base64 Encoded</label></div>
+	<div><input id="msg-salt" type="checkbox"/>
+		<label for="msg-salt">Encrypt with Random Salt</label></div>
+	<div><input id="encr" type="button"
+		value="Encrypt" onclick="do_encr()"/></div>
+
+	<h4>Encrypted Message</h4>
+	<div><label for="enc">Ciphertext</label></div>
+	<div><textarea id="enc" cols="90"></textarea></div>
+	<div><input id="enc-pkt" type="checkbox"/>
+		<label for="enc-pkt">Hohha Packet Format</label></div>
+	<div><input id="decr" type="button"
+		value="Decrypt" onclick="do_decr()"/></div>
+
+	<script src="b64.js"></script>
+	<script src="utf8.js"></script>
+	<script src="hohha.js"></script>
+	<script>
+		// Junky stuff to make the page work.
+
+		var elKey = document.getElementById('key');
+		var elKeyJmp = document.getElementById('key-jmp');
+		var elKeyLen = document.getElementById('key-len');
+		var elSalt = document.getElementById('salt');
+		var elMsg = document.getElementById('msg');
+		var elMsgB64 = document.getElementById('msg-b64');
+		var elMsgSalt = document.getElementById('msg-salt');
+		var elEnc = document.getElementById('enc');
+		var elEncPkt = document.getElementById('enc-pkt');
+
+		function do_key() {
+			var jmp = parseInt(elKeyJmp.value);
+			if (jmp < 2 || jmp >= 256) throw "invalid jumps";
+
+			var len = parseInt(elKeyLen.value);
+			if (len < 64 || len >= 65536) throw "invalid len";
+			if (len & (len-1)) throw "invalid len";
+
+			var salt = saltFromStr(elSalt.value);
+			var body = genRandomBytes(len);
+
+			var key = new Uint8Array(11 + len);
+			key[0] = jmp;
+			key[1] = len;
+			key[2] = len>>8;
+			key.set(salt, 3);
+			key.set(body, 11);
+
+			elKey.value = base64js.fromByteArray(key);
+		}
+
+		function do_salt() {
+			elSalt.value = saltToStr(genRandomBytes(8));
+		}
+
+		function do_salt_of_key() {
+			var key = base64js.toByteArray(elKey.value);
+
+			elSalt.value = saltToStr(key.slice(3,11));
+		}
+
+		function do_encr() {
+			if (elEncPkt.checked) throw "packet format is not supported yet";
+			if (elMsgSalt.checked) do_salt();
+
+			var key = base64js.toByteArray(elKey.value);
+			var salt = saltFromStr(elSalt.value);
+			var msg = elMsg.value;
+
+			if (elMsgB64.checked) {
+				msg = base64js.toByteArray(msg);
+			}
+			else {
+				var m8 = utf8.encode(msg);
+				msg = new Uint8Array(m8.length);
+				for (var i = 0; i < m8.length; ++i) {
+					msg[i] = m8.charCodeAt(i);
+				}
+			}
+
+			var crc = hxHelperEncrypt(key, salt, msg);
+
+			elEnc.value = base64js.fromByteArray(msg);
+		}
+
+		function do_decr() {
+			if (elEncPkt.checked) throw "packet format is not supported yet";
+			var key = base64js.toByteArray(elKey.value);
+			var salt = saltFromStr(elSalt.value);
+			var msg = base64js.toByteArray(elEnc.value);
+
+			var crc = hxHelperDecrypt(key, salt, msg);
+
+			if (elMsgB64.checked) {
+				msg = base64js.fromByteArray(msg);
+			}
+			else {
+				msg = String.fromCharCode.apply(null, msg);
+				msg = utf8.decode(msg);
+			}
+
+			elMsg.value = msg;
+		}
+
+		function saltFromStr(str) {
+			var salt = new Uint8Array(8);
+
+			var vals = str.split(" ").map(_int);
+			if (vals.length != 8) throw "invalid salt";
+
+			for (var i = 0; i < 8; ++i) {
+				if (vals[i] < 0) throw "invalid salt";
+				if (vals[i] >= 256) throw "invalid salt";
+				salt[i] = vals[i];
+			}
+
+			return salt;
+		}
+
+		function saltToStr(salt) {
+			return salt.join(" ");
+		}
+
+		function genRandomBytes(len) {
+			var data = new Uint8Array(len);
+			for (var i = 0; i < len; ++i) {
+				data[i] = Math.random() * 256;
+			}
+			return data;
+		}
+
+		function _int(x) { return parseInt(x); }
+		function _chr(x) { return String.fromCharCode(x); }
+
+		// Initialize with defaults and randomness
+		do_salt();
+
+		elKeyJmp.value = 4;
+		elKeyLen.value = 128;
+		do_key();
+
+		elMsg.value = "Hello Mysterious World!";
+		elMsgB64.checked = false;
+		elMsgSalt.checked = true;
+
+		elEncPkt.checked = false;
+
+		do_encr();
+	</script>
+</body>
